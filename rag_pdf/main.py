@@ -43,6 +43,7 @@ def main():
         print("Loading existing vector DB...\n")
         vector_store = load_db(embedding_model)
 
+    chat_history = []  # to maintain conversation history
     while True:
         query = input("\nAsk a question (or type 'exit'): ")
 
@@ -57,7 +58,8 @@ def main():
             print(doc.page_content)
 
         # 6. GENERATE
-        answer_query(results, query)
+        response = answer_query(results, query, chat_history)
+        chat_history.append({"human": query, "assistant": response})
 
 if __name__ == "__main__":
     main()
