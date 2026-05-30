@@ -2,7 +2,7 @@ import os
 from embeddings import get_embedding_model
 from ingestion import chunk_documents, load_pdf
 from vector_db import create_db, load_db
-from llm import answer_query
+from llm import answer_query, rewrite_query
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,8 +50,12 @@ def main():
         if query.lower() == "exit":
             break
 
+        rewritten = rewrite_query(query, chat_history)
+        if rewritten != query:
+            print(f"\n[Rewritten query: {rewritten}]")
+
         # 5. RETRIEVE
-        results = vector_store.similarity_search_with_score(query, k=5)  # type: ignore
+        results = vector_store.similarity_search_with_score(rewritten, k=5)  # type: ignore
 
         for i, (doc, score) in enumerate(results, start=1):
             print(f"\n--- Chunk {i} (score: {score:.4f}) ---")
