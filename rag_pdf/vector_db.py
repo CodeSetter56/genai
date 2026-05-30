@@ -4,12 +4,11 @@ from langchain_chroma import Chroma
 PERSIST_DIRECTORY = "./chroma_db"
 
 def create_db(chunks, embedding_model):
-
     batch_size = 50
     vector_store = None
 
-    for i in range(0, len(chunks), batch_size): # skips by batch size
-        batch_chunks = chunks[i:i + batch_size] # gets the batch of chunks
+    for i in range(0, len(chunks), batch_size):
+        batch_chunks = chunks[i:i + batch_size]
 
         if vector_store is None:
             vector_store = Chroma.from_documents(
@@ -20,10 +19,12 @@ def create_db(chunks, embedding_model):
         else:
             vector_store.add_documents(batch_chunks)
 
-        # avoid rate limit
         if i + batch_size < len(chunks):
-                    time.sleep(60)
-                
+            time.sleep(60)
+
+    if vector_store is None: # ensure vector_store is created even if chunks is empty
+        raise ValueError("No chunks provided to create_db.")
+
     return vector_store
 
 
