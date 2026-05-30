@@ -8,12 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+data/
+chroma_db/
 .env
-
-# docs 
-rag_pdf/data/*
-!rag_pdf/data/.gitkeep
-
-# db
-rag_pdf/chroma_db/*
-!rag_pdf/chroma_db/.gitkeep
