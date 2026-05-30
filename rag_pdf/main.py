@@ -1,10 +1,10 @@
-from calendar import c
 import os
-
 from embeddings import get_embedding_model
 from ingestion import chunk_documents, load_pdf
 from vector_db import create_db, load_db
+from dotenv import load_dotenv
 
+load_dotenv()
 
 PDF_FILE = "./data/tcs joining.pdf"
 
