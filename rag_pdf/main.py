@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PDF_FILE = "./data/tcs joining.pdf"
+PDF_FILE = "./data/tcs ol.pdf"
 
 CHUNK_SIZE = 300
 CHUNK_OVERLAP = 75
@@ -55,7 +55,7 @@ def main():
             break
 
         # 4 retrieve relevant chunks using similarity search
-        results = vector_store.similarity_search_with_score(
+        results = vector_store.similarity_search_with_score( # type: ignore
             query,
             k=3
         )
@@ -63,8 +63,7 @@ def main():
         print("\nTop Retrieved Chunks:\n")
 
         for i, (doc, score) in enumerate(results, start=1):
-            print(f"\n--- Chunk {i} ---")
-            print(f"Score: {score}")
+            print(f"\n--- Chunk {i} (score: {score:.4f}) ---")
 
             print("\nMETADATA:")
             print(doc.metadata)
