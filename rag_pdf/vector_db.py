@@ -8,6 +8,7 @@ def create_db(chunks, embedding_model):
     vector_store = None
 
     for i in range(0, len(chunks), batch_size):
+        # batching chunks to avoid rate limits and memory issues when embedding large documents
         batch_chunks = chunks[i:i + batch_size]
 
         if vector_store is None:
@@ -19,6 +20,7 @@ def create_db(chunks, embedding_model):
         else:
             vector_store.add_documents(batch_chunks)
 
+        # avoiding rate limit
         if i + batch_size < len(chunks):
             time.sleep(60)
 

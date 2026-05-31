@@ -2,6 +2,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from memory import format_chat_history
 
+# lazy initialization of the model to avoid dotenv mounting issues
 _model = None
 def get_model():
     global _model
@@ -30,7 +31,8 @@ def answer_query(results, query, chat_history):
     
     context = "\n\n".join([doc.page_content for doc, _ in results])
     history_str = format_chat_history(chat_history)
-    chain = prompt | get_model()
+
+    chain = prompt | get_model() # prompt -> model -> response
     
     print("\nAnswer: ", end="", flush=True)
     full_response = ""
