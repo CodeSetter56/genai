@@ -6,6 +6,7 @@ from vector_db import create_db, load_db
 from llm import answer_query, get_model
 from memory import rewrite_query
 from router import generate_pdf_description, route_query
+from rerank import rerank_documents # Import the new rerank function
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -96,12 +97,23 @@ def main():
             filter={"source": {"$in": [os.path.join(DATA_DIR, f) for f in selected_files]}}  # type: ignore
         )
 
-        for i, (doc, score) in enumerate(results, start=1):
-            print(f"\n--- Chunk {i} (score: {score:.4f}) ---")
+        # RERANKING STEP: Re-evaluate and reorder the retrieved documents
+        if results:
+            print(f"\nReranking {len(results)} retrieved chunks...")
+            # We pass the rewritten query to the reranker for better context
+            # and request the top 5 most relevant chunks after reranking.
+            reranked_results = rerank_documents(rewritten, results, top_n=5)
+        else:
+            reranked_results = [] # No results to rerank
+
+        # Print the reranked chunks
+        for i, (doc, score) in enumerate(reranked_results, start=1):
+            print(f"\n--- Chunk {i} (reranked score: {score:.4f}) ---")
             print(doc.page_content)
 
         # 6. GENERATE
-        response = answer_query(results, query, chat_history)
+        # Pass the reranked results to the answer_query function
+        response = answer_query(reranked_results, query, chat_history)
         chat_history.append({"human": query, "assistant": response})
 
 if __name__ == "__main__":
