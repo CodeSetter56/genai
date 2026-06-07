@@ -12,3 +12,4 @@ wheels/
 data/
 chroma_db/
 .env
+.aider*

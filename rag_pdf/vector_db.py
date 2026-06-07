@@ -39,3 +39,15 @@ def load_db(embedding_model):
 
     return vector_store
 
+def add_to_db(chunks, embedding_model):
+    vector_store = load_db(embedding_model)
+    batch_size = 50
+
+    for i in range(0, len(chunks), batch_size):
+        batch_chunks = chunks[i:i + batch_size]
+        vector_store.add_documents(batch_chunks)
+
+        if i + batch_size < len(chunks):
+            time.sleep(60)  # avoid rate limit
+
+    return vector_store
