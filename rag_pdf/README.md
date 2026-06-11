@@ -12,30 +12,35 @@ A multi-PDF question-answering chatbot built from scratch using LangChain, Chrom
 - Streaming responses
 - Auto-generated document descriptions
 - Rate-limit-safe batched embedding
+- **Incremental PDF Indexing**: Efficiently updates the vector store when PDFs are added or removed, avoiding full re-indexing.
+- **Query Decomposition**: Breaks down complex, multi-part questions into simpler sub-queries for more targeted retrieval.
+- **Chat History Limiting**: Maintains a concise conversational context by limiting the chat history size.
 
 ---
 
 ## Tech Stack
 
-| Component | Tool |
-|---|---|
-| Embeddings | Google Gemini (`gemini-embedding-001`) |
-| Vector Store | Chroma (local) |
-| LLM | Groq (`llama-3.3-70b-versatile`) |
-| Framework | LangChain |
-| Package Manager | uv |
+| Component       | Tool                                   |
+| --------------- | -------------------------------------- |
+| Embeddings      | Google Gemini (`gemini-embedding-001`) |
+| Vector Store    | Chroma (local)                         |
+| LLM             | Groq (`llama-3.3-70b-versatile`)       |
+| Framework       | LangChain                              |
+| Package Manager | uv                                     |
 
 ---
 
 ## Setup
 
 **1. Clone the repo**
+
 ```bash
 git clone https://github.com/CodeSetter56/genai.git
 cd genai/rag_pdf
 ```
 
 **2. Install dependencies**
+
 ```bash
 uv sync
 ```
@@ -43,12 +48,14 @@ uv sync
 **3. Add API keys**
 
 Create a `.env` file in `rag_pdf/`:
+
 ```bash
 GOOGLE_API_KEY=your_gemini_key_here
 GROQ_API_KEY=your_groq_key_here
 ```
 
 Get your keys:
+
 - Gemini: https://aistudio.google.com
 - Groq: https://console.groq.com
 
@@ -57,11 +64,12 @@ Get your keys:
 Drop any PDF files into the `data/` folder. The folder is created automatically on first run if it doesn't exist.
 
 **5. Run**
+
 ```bash
 uv run main.py
 ```
 
-On first run, the app indexes all PDFs and saves the vector store to `chroma_db/`. Subsequent runs load the existing DB instantly.
+On first run, the app indexes all PDFs and saves the vector store to `chroma_db/`. Subsequent runs load the existing DB instantly and check for new or removed PDFs to update the index incrementally.
 
 ---
 
@@ -74,7 +82,7 @@ rag_pdf/
 ├── ingestion.py     # PDF loading and chunking
 ├── vector_db.py     # Chroma vector store creation and loading
 ├── llm.py           # LLM setup and answer generation
-├── memory.py        # chat history formatting and query rewriting
+├── memory.py        # chat history formatting, query rewriting, and decomposition
 ├── router.py        # PDF routing and description generation
 ├── data/            # put your PDFs here (gitignored)
 └── chroma_db/       # auto-generated vector store (gitignored)
@@ -87,9 +95,9 @@ rag_pdf/
 The full pipeline runs in sequence on every query:
 
 ```
-PDF files → load → chunk → embed → store (first run only)
+PDF files → load → chunk → embed → store (first run or new/removed PDFs)
                                         ↓
-query → rewrite → route → retrieve → generate → answer
+query → decompose → rewrite → route → retrieve → generate → answer
 ```
 
 ---
@@ -128,17 +136,27 @@ def get_embedding_model():
     return GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 ```
 
-### 4. Persistent Vector Store
+### 4. Persistent Vector Store & Incremental Indexing
 
-Chroma stores embeddings to disk so PDFs are only re-indexed when the `chroma_db/` folder is missing. Subsequent runs load instantly.
+Chroma stores embeddings to disk so PDFs are only re-indexed when the `chroma_db/` folder is missing. Subsequent runs load instantly. Additionally, the system intelligently detects new or removed PDFs and updates the index incrementally without rebuilding the entire database.
 
 ```python
-# vector_db.py
-vector_store = Chroma.from_documents(
-    documents=batch_chunks,
-    embedding=embedding_model,
-    persist_directory="./chroma_db"
-)
+# main.py (simplified for illustration)
+# Removal of PDFs
+removed_pdfs = get_removed_pdfs(DATA_DIR, indexed_files)
+if removed_pdfs:
+    pdf_descriptions, indexed_files = remove_pdfs_from_index(
+        vector_store, DATA_DIR, removed_pdfs, pdf_descriptions, indexed_files
+    )
+
+# Addition of new PDFs
+new_pdfs = get_new_pdfs(DATA_DIR, indexed_files)
+if new_pdfs:
+    new_chunks = load_new_pdf_chunks(DATA_DIR, new_pdfs, CHUNK_SIZE, CHUNK_OVERLAP)
+    vector_store = add_to_db(new_chunks, embedding_model)
+
+# indexer.py (snippet for deletion)
+# vector_store.delete(where={"source": os.path.join(data_dir, pdf_file)})
 ```
 
 ### 5. Batched Embedding with Rate Limit Handling
@@ -177,21 +195,18 @@ for chunk in chain.stream({"context": context, "question": query, "chat_history"
     full_response += content
 ```
 
-### 8. Conversation Memory
+### 8. Conversation Memory & Limiting
 
-Each question and answer is stored in `chat_history` and injected into the prompt. This lets the LLM understand follow-up questions like "what about Cognizant?" without losing context.
+Each question and answer is stored in `chat_history` and injected into the prompt. The history is limited to the most recent turns to maintain focus and manage token usage effectively.
 
 ```python
 # memory.py
-def format_chat_history(chat_history):
-    lines = []
-    for turn in chat_history:
-        lines.append(f"Human: {turn['human']}")
-        lines.append(f"Assistant: {turn['assistant']}")
-    return "\n".join(lines)
-```
+CHAT_HISTORY_LIMIT = 7
 
-```python
+def format_chat_history(chat_history):
+    recent = chat_history[-CHAT_HISTORY_LIMIT:]
+    # ... format history ...
+
 # main.py
 chat_history = []
 response = answer_query(results, query, chat_history)
@@ -207,6 +222,8 @@ Follow-up questions like "and what about Cognizant?" are rewritten into standalo
 def rewrite_query(query, chat_history, get_model):
     if not chat_history:
         return query
+    recent = chat_history[-CHAT_HISTORY_LIMIT:]
+    history_str = format_chat_history(recent)
     rewrite_prompt = f"""Given this conversation history: {history_str}
     Rewrite this follow-up question as a standalone search query: "{query}"
     Return only the rewritten query, nothing else."""
@@ -214,39 +231,53 @@ def rewrite_query(query, chat_history, get_model):
     return str(response.content)
 ```
 
-### 10. Multi-PDF Routing with Auto-Generated Descriptions
+### 10. Query Decomposition
 
-When multiple PDFs are loaded, the router uses an LLM to decide which documents are relevant to the query. Descriptions are auto-generated from each PDF's content on first run and saved to disk — so the router works for any documents, not just hardcoded ones.
+Complex user queries are decomposed into a list of simpler, standalone sub-queries. Each sub-query is then processed independently through the RAG pipeline, allowing for more comprehensive information retrieval.
 
 ```python
-# router.py
+# memory.py
+def decompose_query(query, get_model):
+    prompt = f"""Analyze this question and determine if it contains multiple distinct information requests.
+            If it does, split it into separate standalone search queries.
+            If it is a single request, return it as-is.
+
+            Question: "{query}"
+
+            Rules:
+            - Only split if there are genuinely separate pieces of information being requested
+            - Each sub-query should be fully standalone
+            - Return one query per line, nothing else"""
+
+    response = get_model().invoke(prompt)
+    sub_queries = [q.strip() for q in str(response.content).strip().split("\n") if q.strip()]
+    return sub_queries
+
+# main.py (usage)
+sub_queries = decompose_query(query, get_model)
+```
+
+### 11. Multi-PDF Routing with Auto-Generated Descriptions & Metadata Filtering
+
+When multiple PDFs are loaded, the router uses an LLM to decide which documents are relevant to the query. Descriptions are auto-generated from each PDF's content on first run and saved to disk — so the router works for any documents, not just hardcoded ones. Retrieval is further refined by filtering the similarity search results to only include chunks from the router-selected PDFs, preventing irrelevant documents from polluting the context.
+
+```python
+# router.py (description generation)
 def generate_pdf_description(filename, chunks):
     sample_text = "\n".join([c.page_content for c in chunks[:3]])
     prompt = f"In one sentence, describe what this document is about: {sample_text}"
     response = get_model().invoke(prompt)
     return str(response.content)
 
-def route_query(query, pdf_descriptions):
-    doc_list = "\n".join([f"- {name}: {desc}" for name, desc in pdf_descriptions.items()])
-    router_prompt = f"""Given these documents: {doc_list}
-    Which are needed to answer: "{query}"?
-    Return only filenames, comma separated."""
-    ...
+# main.py (routing and filtering)
+selected_files = route_query(rewritten, pdf_descriptions)
+sub_results = vector_store.similarity_search_with_score(
+    rewritten, k=5,
+    filter={"source": {"$in": [os.path.join(DATA_DIR, f) for f in selected_files]}} # type: ignore
+)
 ```
 
 Example — asking "what is my Cognizant salary" routes only to `cognizant.pdf`, while "compare TCS and Cognizant salaries" routes to both offer letter PDFs.
-
-### 11. Metadata Filtering
-
-Retrieval is filtered by source filename so only chunks from the router-selected PDFs are searched. This prevents irrelevant documents from polluting the context.
-
-```python
-# main.py
-results = vector_store.similarity_search_with_score(
-    rewritten, k=7,
-    filter={"source": {"$in": [os.path.join(DATA_DIR, f) for f in selected_files]}}
-)
-```
 
 ### 12. Lazy Initialization
 
@@ -294,17 +325,13 @@ prompt = ChatPromptTemplate.from_template("""
 
 ## How to Add New PDFs
 
-1. Drop the new PDF into `data/`
-2. Delete `chroma_db/` to force re-indexing
-3. Run `uv run main.py`
-
-The app will re-index all PDFs, auto-generate a description for the new one, and rebuild the vector store.
+1.  Drop the new PDF into `data/`
+2.  Run `uv run main.py`
+    The app will automatically detect new PDFs, load, chunk, embed, and generate a description for them, adding them to the existing vector store without requiring a full rebuild.
 
 ---
 
 ## Known Limitations
 
-- Re-indexing required when adding new PDFs (no incremental update)
 - Gemini free tier: 100 embed requests/min — large PDFs take a few minutes to index
-- Router occasionally selects wrong TCS document when query spans both offer letter and joining letter
 - No web interface — terminal only
