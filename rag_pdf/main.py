@@ -7,7 +7,7 @@ from indexer import (load_descriptions, save_descriptions,
                      load_new_pdf_chunks, remove_pdfs_from_index)
 from vector_db import create_db, load_db, add_to_db
 from llm import answer_query, get_model
-from memory import rewrite_query
+from memory import rewrite_query, decompose_query
 from router import generate_pdf_description, route_query
 from dotenv import load_dotenv
 
@@ -108,20 +108,37 @@ def main():
         if query.lower() == "exit":
             break
 
-        # 4.2. REWRITE: rephrase follow-up queries into standalone questions
-        rewritten = rewrite_query(query, chat_history, get_model)
-        if rewritten != query:
-            print(f"\n[Rewritten query: {rewritten}]")
+        # 5. RETRIEVE: route and retrieve relevant chunks per sub-query
+        # 5.1. DECOMPOSE: split multi-part queries into individual sub-queries
+        sub_queries = decompose_query(query, get_model)
 
-        # 4.3. ROUTE: select relevant PDFs for this query
-        selected_files = route_query(rewritten, pdf_descriptions)
-        print(f"\n[Selected PDFs for retrieval: {selected_files}]")
+        results = []
+        # for deduplication across sub-queries, we track seen chunk IDs (using a hash of the content here for simplicity)
+        seen_ids = set()
 
-        # 5. RETRIEVE: similarity search filtered to selected PDFs
-        results = vector_store.similarity_search_with_score(
-            rewritten, k=7,
-            filter={"source": {"$in": [os.path.join(DATA_DIR, f) for f in selected_files]}}  # type: ignore
-        )
+        for sub_query in sub_queries:
+            # 5.2. REWRITE: rephrase each sub-query into a standalone search query
+            rewritten = rewrite_query(sub_query, chat_history, get_model)
+            if rewritten != sub_query:
+                print(f"\n[Rewritten sub-query: {rewritten}]")
+
+            # 5.3. ROUTE: select relevant PDFs for this sub-query
+            selected_files = route_query(rewritten, pdf_descriptions)
+            print(f"\n[Sub-query: {rewritten}]")
+            print(f"[Selected PDFs: {selected_files}]")
+
+            # 5.4. SEARCH: similarity search filtered to selected PDFs
+            sub_results = vector_store.similarity_search_with_score(
+                rewritten, k=5,
+                filter={"source": {"$in": [os.path.join(DATA_DIR, f) for f in selected_files]}}  # type: ignore
+            )
+
+            # deduplicate by chunk content to avoid passing same chunk twice to LLM
+            for doc, score in sub_results:
+                chunk_id = doc.page_content[:100]
+                if chunk_id not in seen_ids:
+                    seen_ids.add(chunk_id)
+                    results.append((doc, score))
 
         for i, (doc, score) in enumerate(results, start=1):
             print(f"\n--- Chunk {i} (score: {score:.4f}) ---")

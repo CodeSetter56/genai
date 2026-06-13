@@ -21,11 +21,8 @@ def answer_query(results, query, chat_history):
         Do NOT hallucinate specific numbers or facts not present in either the context or your training.
         If you truly cannot answer, say "I don't know based on the provided document."
         
-        Previous conversation:
-        {chat_history}
-        
+        Previous conversation: {chat_history}
         Context: {context}
-        
         Question: {question}
         """)
     

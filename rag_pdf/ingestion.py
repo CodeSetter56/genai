@@ -11,6 +11,7 @@ def load_pdf(pdf_file):
 def load_all_pdfs(data_dir, only_files=None):
     pdf_files = glob.glob(os.path.join(data_dir, "*.pdf"))
 
+    # filter to only specified files if provided
     if only_files:
         pdf_files = [f for f in pdf_files if os.path.basename(f) in only_files]
 
